@@ -83,6 +83,12 @@ else:
 # Train the model
 gen_losses, disc_losses = model_fit(dataset, hyperparams, checkpoint_prefix)
 
+
+# Define the directory path
+model_dir = './Trained_models'
+
+# Create the directory if it doesn't exist
+os.makedirs(model_dir, exist_ok=True)
 # Save the models
 generator.save('./Trained_models/pix2pix_model_generator.keras')
 discriminator.save('./Trained_models/pix2pix_model_discriminator.keras')
