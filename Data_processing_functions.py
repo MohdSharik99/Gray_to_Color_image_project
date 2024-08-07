@@ -54,12 +54,11 @@ def create_dataset(gray_image_paths, lab_image_paths, target_size=(256, 256), ba
         )
         gray_img.set_shape([target_size[0], target_size[1], 1])
         lab_img.set_shape([target_size[0], target_size[1], 3])
-        
-
         return gray_img, lab_img
     
     dataset = dataset.map(map_fn, num_parallel_calls=tf.data.AUTOTUNE)
+    dataset = dataset.cache()  # Add caching
+    dataset = dataset.shuffle(buffer_size=100)  # Adjust buffer size if needed
     dataset = dataset.batch(batch_size).prefetch(tf.data.AUTOTUNE)
     
     return dataset
-
