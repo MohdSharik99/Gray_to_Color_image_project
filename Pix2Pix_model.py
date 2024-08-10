@@ -21,12 +21,13 @@ hyperparams = {
     'batch_size': 1,
     'epochs': 50,
     'dropout': True,
-    'input_shape': (256, 256, 1)
+    'input_shape': (512, 512, 1), 
+    'target_size': (512,512)
 }
 
 # Define the downsampling and upsampling blocks
 def downsample(filters, size, apply_batchnorm=True):
-    initializer = tf.random_normal_initializer(0., 0.02)
+    initializer = tf.keras.initializers.RandomNormal(mean=0.0, stddev=0.02)
     result = tf.keras.Sequential()
     result.add(tf.keras.layers.Conv2D(filters, size, strides=2, padding='same', kernel_initializer=initializer, use_bias=False))
     if apply_batchnorm:
@@ -34,13 +35,13 @@ def downsample(filters, size, apply_batchnorm=True):
     result.add(tf.keras.layers.LeakyReLU())
     return result
 
-def upsample(filters, size, apply_dropout=False):
-    initializer = tf.random_normal_initializer(0., 0.02)
+def upsample(filters, size, apply_dropout=False, dropout_rate=0.5):
+    initializer = tf.keras.initializers.RandomNormal(mean=0.0, stddev=0.02)
     result = tf.keras.Sequential()
     result.add(tf.keras.layers.Conv2DTranspose(filters, size, strides=2, padding='same', kernel_initializer=initializer, use_bias=False))
     result.add(tf.keras.layers.BatchNormalization())
     if apply_dropout:
-        result.add(tf.keras.layers.Dropout(hyperparams['dropout_rate']))
+        result.add(tf.keras.layers.Dropout(dropout_rate))
     result.add(tf.keras.layers.ReLU())
     return result
 
@@ -131,8 +132,8 @@ def train_step(generator, discriminator, input_image, target, generator_optimize
 
     return gen_total_loss, disc_loss
 
-# Training function without validation
-def model_fit(train_ds, hyperparams, checkpoint_prefix):
+# Training function with resume capability
+def model_fit(gray_images_dataset, color_images_dataset, hyperparams, checkpoint_prefix, resume_epoch=0):
     gen_losses = []
     disc_losses = []
 
@@ -149,49 +150,60 @@ def model_fit(train_ds, hyperparams, checkpoint_prefix):
                                      generator=generator,
                                      discriminator=discriminator)
 
-    for epoch in range(hyperparams['epochs']):
+    # Restore checkpoint if available
+    latest_checkpoint = tf.train.latest_checkpoint(checkpoint_prefix)
+    if latest_checkpoint:
+        checkpoint.restore(latest_checkpoint)
+        with open(f'{checkpoint_prefix}/epoch.txt', 'r') as f:
+            resume_epoch = int(f.read().strip())
+        print(f"Restored from checkpoint: {latest_checkpoint}, Resuming from epoch {resume_epoch}")
+    else:
+        print("Starting fresh training")
+
+    best_gen_loss = float('inf')
+    patience_counter = 0
+    patience = 5  # Number of epochs with no improvement before stopping
+
+    for epoch in range(resume_epoch, hyperparams['epochs']):
         start = time.time()
         epoch_gen_loss = 0
         epoch_disc_loss = 0
 
         # Progress bar
-        progbar = tf.keras.utils.Progbar(len(train_ds), stateful_metrics=['loss'])
+        progbar = tf.keras.utils.Progbar(len(gray_images_dataset), stateful_metrics=['loss'])
 
-        for step, (input_image, target) in enumerate(train_ds):
-            gen_total_loss, disc_loss = train_step(generator, discriminator, input_image, target, generator_optimizer, discriminator_optimizer)
+        for step, (gray_image, color_image) in enumerate(tf.data.Dataset.zip((gray_images_dataset, color_images_dataset))):
+            gen_total_loss, disc_loss = train_step(generator, discriminator, gray_image, color_image, generator_optimizer, discriminator_optimizer)
             epoch_gen_loss += gen_total_loss
             epoch_disc_loss += disc_loss
 
             # Update progress bar
             progbar.update(step + 1, [('gen_loss', gen_total_loss), ('disc_loss', disc_loss)])
 
-        gen_losses.append(epoch_gen_loss / len(train_ds))
-        disc_losses.append(epoch_disc_loss / len(train_ds))
+        avg_gen_loss = epoch_gen_loss / len(gray_images_dataset)
+        avg_disc_loss = epoch_disc_loss / len(gray_images_dataset)
+        
+        gen_losses.append(avg_gen_loss)
+        disc_losses.append(avg_disc_loss)
 
         # Save checkpoint
         checkpoint.save(file_prefix=checkpoint_prefix)
 
-        print(f'Epoch {epoch+1}, Gen Loss: {gen_losses[-1]}, Disc Loss: {disc_losses[-1]}, Time: {time.time() - start}')
+        # Save current epoch number
+        with open(f'{checkpoint_prefix}/epoch.txt', 'w') as f:
+            f.write(str(epoch + 1))
+
+        print(f'Epoch {epoch+1}, Gen Loss: {avg_gen_loss}, Disc Loss: {avg_disc_loss}, Time: {time.time() - start}')
 
         # Early stopping logic
-        if len(gen_losses) > 1 and gen_losses[-1] > gen_losses[-2]:
-            print("Early stopping triggered")
-            break
+        if avg_gen_loss < best_gen_loss:
+            best_gen_loss = avg_gen_loss
+            patience_counter = 0
+        else:
+            patience_counter += 1
+            if patience_counter >= patience:
+                print("Early stopping triggered")
+                break
 
     return gen_losses, disc_losses
 
-# Visualize losses
-def visualize_losses(gen_losses, disc_losses):
-    plt.figure(figsize=(12, 6))
-    
-    # Plot Generator and Discriminator Losses
-    plt.subplot(1, 1, 1)
-    plt.plot(gen_losses, label='Generator Loss')
-    plt.plot(disc_losses, label='Discriminator Loss')
-    plt.xlabel('Epoch')
-    plt.ylabel('Loss')
-    plt.legend()
-    plt.title('Generator and Discriminator Losses')
-
-    plt.tight_layout()
-    plt.show()
