@@ -19,7 +19,7 @@ hyperparams = {
     'learning_rate': 1e-3,
     'beta_1': 0.5,
     'batch_size': 1,
-    'epochs': 50,
+    'epochs': 30,
     'dropout': True,
     'input_shape': (512, 512, 1), 
     'target_size': (512,512)
